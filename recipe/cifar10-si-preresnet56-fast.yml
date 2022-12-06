@@ -1,0 +1,22 @@
+arch: si_preresnet56
+
+total_batch_size: 128
+bn_batch_size: 128
+
+opt: SGD
+lr: 0.1
+beta1: 0.9
+nesterov: 0
+wd: 0.0005
+epochs: 90
+
+no_wd_on_bias: 0
+no_wd_on_normalizer: 0
+
+lrdecay_sche:
+  - 30
+  - 80
+warmup: 0
+
+aug_crop: 1
+aug_hflip: 1

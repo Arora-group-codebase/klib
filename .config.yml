@@ -1,0 +1,9 @@
+imagenet_ffcv_train_pth: /scratch/imagenet_ffcv/train_500_0.50_90.ffcv
+imagenet_ffcv_val_pth: /scratch/imagenet_ffcv/val_500_0.50_90.ffcv
+
+imagenet_torch_train_pth: /n/fs/ptml/datasets/imagenet/train
+imagenet_torch_val_pth: /n/fs/ptml/datasets/imagenet/val
+
+cifar10_data_pth: /n/fs/ptml/datasets/cifar10
+
+wandb_entity: vfleaking

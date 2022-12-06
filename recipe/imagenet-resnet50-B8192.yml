@@ -1,0 +1,22 @@
+arch: resnet50
+
+total_batch_size: 8192
+physical_batch_size: 128
+bn_batch_size: 32
+
+opt: SGD
+lr: 0.1
+beta1: 0.9
+nesterov: 1
+epochs: 90
+
+wd: 0.0001
+no_wd_on_bias: 1
+no_wd_on_normalizer: 1
+
+lrdecay_sche:
+  - 30
+  - 60
+  - 80
+warmup: 1
+warmup_epochs: 5
