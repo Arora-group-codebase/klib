@@ -33,6 +33,7 @@ class KModel:
         KModel.total_train_time += time.time() - last
         return res
 
+
     def _train_step(self, inputs, targets, *, autocast, grad_upscale=1):
         if not self.model.training: # optimize for speed
             self.model.train()
@@ -58,12 +59,14 @@ class KModel:
                 torch.as_tensor(inputs.shape[0], dtype=cur_loss.dtype, device=cur_loss.device)
             ])
         
+
     @torch.no_grad()
     def eval_step(self, inputs, targets, *, autocast):
         last = time.time()
         res = self._eval_step(inputs, targets, autocast=autocast)
         KModel.total_eval_time += time.time() - last
         return res
+
 
     def _eval_step(self, inputs, targets, *, autocast):
         if self.model.training: # optimize for speed

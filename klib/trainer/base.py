@@ -1,9 +1,10 @@
 import torch
 import torch.distributed as dist
-import os
+import os, sys
+from klib.kdataloader import KDataLoader
 from klib.kmodel import KModel
 from klib.ksche import KScheduler, KConstScheduler
-from klib.kgrad_scaler import KGradScaler
+from klib.kgrad_scaler import GradScaleTooLargeError, KGradScaler
 import numpy as np
 import random
 import yaml
@@ -13,6 +14,9 @@ import torchsummary
 from torch.optim import Optimizer
 import torch.cuda
 import torch.cuda.amp
+import wandb
+import signal
+import math
 
 from klib.train_utils import load_builtin_optimizer, load_builtin_model, load_builtin_criterion, TORCH_DTYPES
 from klib.train_utils import get_flat_tensor_from_tensor_sequence, set_flat_tensor_to_tensor_sequence
@@ -65,7 +69,6 @@ class BaseTrainerSetup:
                 self.args.physical_batch_size = self.local_batch_size
             self.physical_batch_size = self.args.physical_batch_size
             assert self.local_batch_size % self.physical_batch_size == 0
-            self.n_grad_accumu = self.local_batch_size // self.physical_batch_size
             if self.args.bn_batch_size is None:
                 self.args.bn_batch_size = self.physical_batch_size
             self.bn_batch_size = self.args.bn_batch_size
@@ -96,9 +99,10 @@ class BaseTrainerSetup:
         mcls, model, *extra = cls.init_get_model(self)
         
         model = model.to(self.device)
+        self.debug_log(f"model device: {self.device}")
         model.eval()
         if self.rank == 0:
-            torchsummary.summary(model, cls.input_size())
+            torchsummary.summary(model, cls.input_size(self))
             
         model = cls.init_model_post_process(self, model)
         self.kmodel = mcls(model, *extra, cls.init_get_criterion(self), *cls.init_get_metrics(self))
@@ -162,7 +166,7 @@ class BaseTrainerSetup:
 
 
     @classmethod
-    def input_size(cls):
+    def input_size(cls, self):
         raise NotImplementedError()
     
     
@@ -177,10 +181,13 @@ class BaseTrainerSetup:
             'grad_scaler_growth_factor': 2,
             'grad_scaler_backoff_factor': 0.5,
             'grad_scaler_growth_interval': 100,
+            'train_step_log_freq': 1,
         }
 
 
 class BaseTrainer:
+
+    world_size: int
 
     kmodel: KModel = None
     kscheduler: KScheduler = None
@@ -197,6 +204,13 @@ class BaseTrainer:
 
     stop_now: bool = False
 
+    n_grad_accumu: int
+    total_batch_size: int
+    local_batch_size: int
+    physical_batch_size: int
+    bn_batch_size: int
+    train_stats = 0
+
 
     def __init__(self, args, setup: BaseTrainerSetup):
         opt = setup.default_args_dict()
@@ -207,6 +221,15 @@ class BaseTrainer:
         self.args = argparse.Namespace(**opt)
         self.args.save_path = './check_point/' + Path(args.recipe_pth).stem + f'-{args.seed}'
         setup.init(self)
+        self.post_init_check()
+
+        self.hooks = {
+            'extra_train_step_log': [],
+        }
+    
+    
+    def post_init_check(self):
+        pass
     
 
     def run(self):
@@ -222,6 +245,12 @@ class BaseTrainer:
         if self.world_size > 1:
             dist.barrier()
             dist.destroy_process_group()
+        
+        signal.signal(signal.SIGALRM, lambda: sys.exit(1))
+        signal.alarm(60)
+        if self.rank == 0:
+            wandb.finish()
+            signal.alarm(0)
         
 
     def resume_step(self):
@@ -272,6 +301,77 @@ class BaseTrainer:
                 for p in g['params']:
                     if p.grad is not None:
                         p.grad /= self.args.grad_upscale
+    
+    
+    def prop_step(self, batch):
+        if isinstance(batch, tuple):
+            if self.n_grad_accumu == 1:
+                batch = [(0,) + batch]
+            else:
+                inputs, targets = batch
+                subinputs = inputs.tensor_split(self.n_grad_accumu)
+                subtargets = targets.tensor_split(self.n_grad_accumu)
+                assert len(subinputs) == self.n_grad_accumu
+                assert len(subtargets) == self.n_grad_accumu
+                assert all(subinputs[i].shape[0] == self.physical_batch_size for i in range(self.n_grad_accumu))
+                assert all(subtargets[i].shape[0] == self.physical_batch_size for i in range(self.n_grad_accumu))
+                batch = [(k, subinputs[k], subtargets[k]) for k in range(self.n_grad_accumu)]
+        else:
+            assert self.args.autocast_dtype != 'float16' or self.n_grad_accumu == 1
+
+
+        def step():
+            train_step_kwargs = dict(
+                autocast=self.autocast,
+                grad_upscale=self.kgrad_scaler.scale if self.kgrad_scaler is not None else self.args.grad_upscale
+            )
+
+            if self.n_grad_accumu == 1:
+                self.optimizer.zero_grad()
+                for i, inputs, targets in batch:
+                    assert i == 0
+                    cur_stats = self.kmodel.train_step(inputs, targets, **train_step_kwargs)
+            else:
+                cur_stats = 0
+                train_step_kwargs['grad_upscale'] /= self.n_grad_accumu
+
+                if self.args.autocast_dtype == 'float16':
+                    assert self.args.ddp_backend != 'torch'
+                    flat = 0
+                    for i, inputs, targets in batch:
+                        self.debug_log(f'train step #{self.step_ctr} grad accumu #{i}')
+                        self.optimizer.zero_grad()
+                        cur_stats += self.kmodel.train_step(inputs, targets, **train_step_kwargs)
+                        flat += get_flat_tensor_from_tensor_sequence(self.kmodel.grads())
+                    set_flat_tensor_to_tensor_sequence(flat, self.kmodel.grads())
+                else:
+                    with self.kmodel.no_ddp_sync():
+                        for i, inputs, targets in batch:
+                            self.debug_log(f'train step #{self.step_ctr} grad accumu #{i}')
+                            if i < self.n_grad_accumu - 1:
+                                cur_stats += self.kmodel.train_step(inputs, targets, **train_step_kwargs)
+                    self.debug_log(f'train step #{self.step_ctr} grad accumu #last')
+                    cur_stats += self.kmodel.train_step(inputs, targets, **train_step_kwargs)
+
+            self.post_process_grad()
+
+            if self.world_size > 1:
+                self.debug_log(f'train step #{self.step_ctr} sync cur stats')
+                dist.reduce(cur_stats, 0)
+            
+            return cur_stats
+
+        
+        for t in range(self.args.grad_scaler_max_retries):
+            try:
+                return step()
+            except GradScaleTooLargeError:
+                pass
+        
+        if self.rank == 0:
+            print("ERROR: cannot find a good grad scaling")
+        self.stop_now = True
+        return None
 
     
     @torch.no_grad()
@@ -288,6 +388,116 @@ class BaseTrainer:
 
         if self.kgrad_scaler is not None:
             self.kgrad_scaler.update()
+
+
+    def need_to_log(self):
+        if self.step_ctr % self.args.train_step_log_freq == 0:
+            return True
+        if self.index_in_epoch == 0 and self.args.eval_freq is not None and self.epoch % self.args.eval_freq == 0:
+            return True
+        return False
+
+
+    def on_train_step_start(self):
+        self.debug_log(f'train step #{self.step_ctr} start')
+
+        self.kscheduler.on_train_step_start(index_in_epoch=self.index_in_epoch)
+        
+        if self.need_to_log() and self.rank == 0:
+            self.step_log = {
+                "train/step": self.step_ctr,
+                "time/total": time.time() - self.start_time,
+                "time/dataloader": KDataLoader.total_load_time,
+                "time/train": KModel.total_train_time,
+                "time/eval": KModel.total_eval_time,
+                "time/update_bn": KModel.total_update_bn_time,
+            }
+            self.kmodel.log_param_stats(self.step_log)
+            if math.isnan(self.step_log['norm/all']) or math.isinf(self.step_log['norm/all']):
+                print("ERROR: NaN detected!")
+                self.stop_now = True
+            self.kscheduler.log('train', self.step_log)
+            
+        if self.index_in_epoch == 0:
+            
+            if self.rank == 0:
+                if self.need_to_log():
+                    self.step_log["epoch"] = self.epoch
+                    if isinstance(self.train_stats, torch.Tensor):
+                        self.kmodel.log_avg_step_stats(self.step_log, 'train_avg', self.train_stats)
+
+                self.train_stats = 0
+
+            if self.args.eval_freq is not None and self.epoch % self.args.eval_freq == 0:
+                self.on_evaluate_start()
+                self.evaluate()
+                self.on_evaluate_end()
+    
+    
+    def log_train_step(self, cur_stats):
+        if self.rank == 0:
+            if cur_stats is not None:
+                self.train_stats += cur_stats
+
+            if self.need_to_log():
+                self.debug_log(f'train step #{self.step_ctr} log step')
+                if self.kgrad_scaler is not None:
+                    self.step_log.update({ 'train/grad_upscale': self.kgrad_scaler.scale })
+                if cur_stats is not None:
+                    self.kmodel.log_grad_stats(self.step_log) # if ddp_backend == 'avg-model', then it only logs the grads for rank 0
+                    self.kmodel.log_avg_step_stats(self.step_log, 'train', cur_stats)
+                self._call_hook('extra_train_step_log')
+                wandb.log(self.step_log, step=self.step_ctr)
+    
+    
+    def on_train_step_end(self):
+        self.kscheduler.on_train_step_end(self.index_in_epoch)
+        self.debug_log(f'train step #{self.step_ctr} end')
+        
+    
+    def on_evaluate_start(self):
+        if self.bn_dataloader is not None:
+            self.estimate_bn_stats()
+    
+    
+    @torch.no_grad()
+    def estimate_bn_stats(self):
+        for idx, (images, targets) in self.bn_dataloader.enum(self.args.bn_batches // self.world_size):
+            self.debug_log(f'estimating BN: {idx}')
+            self.kmodel.update_bn(idx, images, autocast=self.autocast)
+
+        if self.world_size > 1:
+            flat = get_flat_tensor_from_tensor_sequence(self.kmodel.bn_buffers())
+            dist.all_reduce(flat)
+            flat /= self.world_size
+            set_flat_tensor_to_tensor_sequence(flat, self.kmodel.bn_buffers())
+
+
+    @torch.no_grad()
+    def evaluate(self):
+        total_step_stats = 0
+        for idx, (inputs, targets) in self.test_dataloader.enum():
+            self.debug_log(f'eval step: {idx}')
+            total_step_stats += self.kmodel.eval_step(inputs, targets, autocast=self.autocast)
+        
+        if self.world_size > 1:
+            dist.reduce(total_step_stats, 0)
+        
+        if self.rank == 0:
+            self.kmodel.log_avg_step_stats(self.step_log, 'test', total_step_stats)
+    
+    
+    def on_evaluate_end(self):
+        pass
+    
+    
+    def register_hook(self, name, func):
+        self.hooks[name].append(func)
+    
+    
+    def _call_hook(self, name):
+        for func in self.hooks[name]:
+            func(self)
     
     
     def debug_log(self, s):
@@ -310,3 +520,6 @@ class BaseTrainer:
         raise NotImplementedError()
     
     
+    @property
+    def n_grad_accumu(self) -> int:
+        return self.local_batch_size // self.physical_batch_size

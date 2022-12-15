@@ -39,6 +39,7 @@ class KModelSIA(KModel):
         
         log[f'norm/si/all'] = si_norm2 ** 0.5
         log[f'norm/nsi/all'] = nsi_norm2 ** 0.5
+        log[f'norm/all'] = (si_norm2 + nsi_norm2) ** 0.5
 
 
     @torch.no_grad()
@@ -61,4 +62,5 @@ class KModelSIA(KModel):
         
         log[f'gnorm/si/all'] = si_norm2 ** 0.5
         log[f'gnorm/nsi/all'] = nsi_norm2 ** 0.5
+        log[f'gnorm/all'] = (si_norm2 + nsi_norm2) ** 0.5
     

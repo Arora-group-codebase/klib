@@ -1,7 +1,7 @@
 import klib.trainer
 from klib.ksche import KMultiStepScheduler
 from .data import get_kdataloader
-from klib.train_utils import count_correct
+from klib.metric import count_correct
 
 from . import arch
 
@@ -47,6 +47,8 @@ class CIFAR10TrainerSetup(klib.trainer.BaseTrainerSetup):
                 crop=self.args.aug_crop, hflip=self.args.aug_hflip,
                 distributed=self.world_size > 1
             )
+        else:
+            self.bn_dataloader = None
     
 
     @classmethod
@@ -58,8 +60,9 @@ class CIFAR10TrainerSetup(klib.trainer.BaseTrainerSetup):
             warmup_steps = self.args.warmup_epochs * self.steps_per_epoch
             if self.args.warmup_start_lr is None:
                 self.args.warmup_start_lr = self.args.lr
-            warmup_sche = [self.args.warmup_start_lr * (1 + (scale - 1) * (t / (warmup_steps - 1))) for t in range(warmup_steps)]
+            warmup_sche = [self.args.warmup_start_lr + (rescaled_lr - self.args.warmup_start_lr) * (t / (warmup_steps - 1))  for t in range(warmup_steps)]
         else:
+            self.args.warmup_epochs = 0
             warmup_sche = [rescaled_lr]
         
         self.kscheduler = KMultiStepScheduler(
@@ -87,5 +90,5 @@ class CIFAR10TrainerSetup(klib.trainer.BaseTrainerSetup):
         }
 
     @classmethod
-    def input_size(cls):
+    def input_size(cls, self):
         return (3, 32, 32)

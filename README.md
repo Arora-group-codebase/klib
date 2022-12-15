@@ -1,6 +1,14 @@
 # klib
 Kaifeng's library for training neural nets
 
+# How to setup
+
+```bash
+conda create -y -n klib python=3.9 cupy pkg-config compilers libjpeg-turbo opencv pytorch torchvision cudatoolkit=11.3 numba -c pytorch -c conda-forge
+conda activate klib
+pip install -r requirements.txt
+```
+
 # How to train CIFAR-10
 
 ``` bash

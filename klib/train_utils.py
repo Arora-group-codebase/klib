@@ -20,22 +20,6 @@ TORCH_DTYPES = {
 }
 
 
-@torch.no_grad()
-def count_correct(output, target, topk=(1,)):
-    """Computes the accuracy over the k top predictions for the specified values of k"""
-    maxk = max(topk)
-
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-    res = []
-    for k in topk:
-        correct_k = correct[:k].reshape(-1).float().sum(0)
-        res.append(correct_k)
-    return res
-
-
 def is_bn(m):
     return isinstance(m, nn.BatchNorm1d) or isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm3d)
 
@@ -107,8 +91,11 @@ def load_builtin_optimizer(model: nn.Module, args) -> optim.Optimizer:
 
 
 def load_builtin_criterion(args) -> nn.Module:
-    assert args.criterion == 'ce'
-    return nn.CrossEntropyLoss()
+    if args.criterion == 'ce':
+        return nn.CrossEntropyLoss()
+    else:
+        assert args.criterion == 'bce'
+        return nn.BCEWithLogitsLoss()
 
 
 def get_torch_dataloader_for_dataset(
@@ -159,3 +146,12 @@ def get_norm2d(w, args, eps=None, momentum=None, **kwargs):
         eps=args.bn_eps if eps is None else eps, momentum=args.bn_momentum if momentum is None else momentum,
         **kwargs
     )
+
+
+def get_activation(activation):
+    if activation == 'relu':
+        return nn.ReLU(inplace=True)
+    elif activation == 'leaky_relu':
+        return nn.LeakyReLU(inplace=True)
+    else:
+        raise NotImplementedError()
