@@ -6,6 +6,8 @@ Kaifeng's library for training neural nets
 Install conda
 
 ```bash
+conda create -y -n klib pkg-config
+conda activate klib
 conda install libjpeg-turbo -c conda-forge
 conda install pytorch=*=*cuda* torchvision pytorch-cuda=11.7 opencv -c pytorch -c nvidia
 conda install numba
