@@ -8,6 +8,7 @@ Install conda
 ```bash
 conda create -y -n klib pkg-config
 conda activate klib
+<<<<<<< HEAD
 conda install libjpeg-turbo -c conda-forge
 conda install pytorch=*=*cuda* torchvision pytorch-cuda=11.7 opencv -c pytorch -c nvidia
 conda install numba
@@ -40,6 +41,8 @@ Write the following content to `<miniconda-path>/envs/klib/etc/conda/deactivate.
 export LD_LIBRARY_PATH=${OLD_LD_LIBRARY_PATH}
 unset OLD_LD_LIBRARY_PATH
 ```
+
+Some pip packages may be needed...
 
 # How to train CIFAR-10
 
