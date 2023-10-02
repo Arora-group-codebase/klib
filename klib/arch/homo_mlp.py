@@ -31,12 +31,16 @@ class HomoMLP(nn.Module):
 
         if init == 'default':
             pass
-        elif init == 'he':
+        elif init.startswith('he'):
             for l in self.layers:
                 torch.nn.init.kaiming_normal_(l.weight.data, nonlinearity=activation)
+                if init.startswith('he-x'):
+                    l.weight.data.mul_(float(init[4:]))
+                if l.bias is not None:
+                    l.bias.data.zero_()
         elif init.startswith('sm'):
             for name, param in self.named_parameters():
-                param.data.normal_(0, 0.1 ** int(init[2:]))
+                param.data.normal_(0, 0.1 ** float(init[2:]))
         else:
             raise NotImplementedError()
     

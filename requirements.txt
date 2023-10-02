@@ -1,0 +1,3 @@
+wandb
+ffcv
+torchsummary

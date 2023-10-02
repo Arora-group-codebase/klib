@@ -1,7 +1,6 @@
 from functools import cached_property
 import torch
 from .base import BaseTrainer
-import wandb
 from klib.kdataloader import KDataLoader
 
 __all__ = ['FullBatchTrainer']
@@ -15,7 +14,12 @@ class FullBatchTrainer(BaseTrainer):
 
     def post_init_check(self):
         assert self.train_dataloader.dataset_size() % self.total_batch_size == 0
-        
+
+        if self.args.steps_per_epoch == -1:
+            self.args.steps_per_epoch = 1
+        else:
+            assert self.args.steps_per_epoch == 1
+    
 
     def run_epoch(self, train=True):
         self.on_train_step_start()
@@ -31,11 +35,6 @@ class FullBatchTrainer(BaseTrainer):
 
         self.on_train_step_end()
     
-    
-    @cached_property
-    def steps_per_epoch(self) -> int:
-        return 1
-
 
     @cached_property
     def n_grad_accumu(self) -> int:

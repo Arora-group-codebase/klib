@@ -8,6 +8,7 @@ import yaml
 
 from klib.trainer import StochasticTrainer
 from klib.cifar10 import CIFAR10TrainerSetup
+from klib.train_utils import parse_trainer_args
 
 config = yaml.load(open('.config.yml'), Loader=yaml.FullLoader)
 
@@ -25,10 +26,11 @@ def main(args):
 
 def init_wandb(args):
     wandb.init(
+        mode=args.wandb,
         project="cifar-base",
         entity=config['wandb_entity'],
-        name=f"{Path(args.recipe_pth).stem}-lr={args.lr}-m={args.beta1}",
-        config=vars(args)
+        name=f"{Path(args.recipe_pth).stem}-lr={args.lr}-model={args.arch}-m={args.beta1}",
+        config=vars(args),
     )
     wandb.run.log_code(".")
     #settings=wandb.Settings(start_method='fork'),
@@ -37,65 +39,20 @@ def init_wandb(args):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--seed', type=int)
-    parser.add_argument('--debug', type=int, default=0)
+    CIFAR10TrainerSetup.add_argparse_args(parser)
 
-    parser.add_argument('--dist-url', default='env://', help='url used to set up distributed training')
-    parser.add_argument('--device', default='cuda', help='device id (i.e. 0 or 0,1 or cpu)')
-
-    parser.add_argument('--recipe-pth', default='recipe/cifar10-preresnet32-B128.yml', help='path to the training recipe (an YAML file)')
-
-    # data loader
-    parser.add_argument('--dataloader-backend', type=str, default='ffcv')
-    parser.add_argument('--n-dataloader-workers', type=int, default=4)
-
-    # batch size
-    parser.add_argument('--total-batch-size', type=int)
-    parser.add_argument('--physical-batch-size', type=int)
-    parser.add_argument('--bn-batch-size', type=int)
-
-    # hyperparam
-    parser.add_argument('--arch', type=str, help='model architecture')
-    parser.add_argument('--lr', type=float)
-    parser.add_argument('--epochs', type=int)
-    parser.add_argument('--beta1', type=float, help='momentum value')
-    parser.add_argument('--nesterov', type=int, help='whether to use nesterov momentum')
-    parser.add_argument('--wd', type=float, help='weight decay value')
-
-    # augmentation
-    parser.add_argument('--aug-crop', type=int)
-    parser.add_argument('--aug-hflip', type=int)
-
-    # normalization
-    parser.add_argument('--norm-layer', type=str, default='bn')
-    parser.add_argument('--bn-eps', type=float, default=1e-5)
-    parser.add_argument('--bn-momentum', type=float, default=0.1)
-    parser.add_argument('--bn-batches', type=int, default=128)
-
-    # scheduler
-    parser.add_argument('--warmup', type=int, help='whether to use lr warmup')
-    parser.add_argument('--warmup-epochs', type=int)
-    parser.add_argument('--warmup-start-lr', type=float)
-    parser.add_argument('--lrdecay-sche', nargs='+', type=int)
-    parser.add_argument('--gamma', type=float, default=0.1, help='the factor for learning rate decay')
-
-    # resume
-    parser.add_argument('--resume', type=int, default=0, help='the epoch to continue training')
-    parser.add_argument('--resume-pth', type=str, help='the path to load the model to resume')
-    
-    # save
-    parser.add_argument('--save-freq', type=int, default=-1)
-    parser.add_argument('--save-latest', type=int, default=0)
+    parser.set_defaults(**{
+        'recipe_pth': 'recipe/cifar10-preresnet32-B128.yml',
+    })
 
     # scale-invariance
-    parser.add_argument('--final-layer-code', type=str, default='linear-fixed-etf')
+    parser.add_argument('--final-layer-code', default='linear-fixed-etf')
 
-    # eval
-    parser.add_argument('--eval-freq', type=int, default=1)
+    # data pth
+    parser.add_argument('--data-pth', default=config['cifar10_data_pth'])
 
+    parser.add_argument('--wandb', type=str, default=None)
 
-    args = parser.parse_args()
-    args.data_pth = config['cifar10_data_pth']
-    args.save_pth = './check_point/' + Path(args.recipe_pth).stem + f'-{args.seed}'
+    args = parse_trainer_args(parser)
     
     main(args)

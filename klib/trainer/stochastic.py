@@ -1,9 +1,7 @@
 import torch
 
 from klib.kdataloader import KDataLoader
-from klib.train_utils import get_flat_tensor_from_tensor_sequence, set_flat_tensor_to_tensor_sequence
 from .base import BaseTrainer
-import wandb
 from functools import cached_property
 
 __all__ = ['StochasticTrainer']
@@ -16,9 +14,14 @@ class StochasticTrainer(BaseTrainer):
     bn_dataloader: KDataLoader
     optimizer: torch.optim.Optimizer
 
+    
+    def post_init_check(self):
+        if self.args.steps_per_epoch == -1:
+            self.args.steps_per_epoch = len(self.train_dataloader)
+
 
     def run_epoch(self, train=True):
-        n_steps = None if train else 1
+        n_steps = self.steps_per_epoch if train else 1
         for self.index_in_epoch, (inputs, targets) in self.train_dataloader.enum(n_steps):
             if not self.stop_now:
                 self.train_step(inputs, targets, train)
@@ -37,8 +40,3 @@ class StochasticTrainer(BaseTrainer):
             self.optimizer_step()
 
         self.on_train_step_end()
-
-    
-    @cached_property
-    def steps_per_epoch(self) -> int:
-        return len(self.train_dataloader)

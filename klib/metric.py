@@ -41,6 +41,20 @@ class LogCrossEntropyLoss(nn.Module):
             return diff.logsumexp(dim=[0, 1]).to(input.dtype)
 
 
+class CELNR(nn.Module): # LNR = label noise regularization
+    def __init__(self, label_smoothing) -> None:
+        super().__init__()
+        self.ce = nn.CrossEntropyLoss()
+        self.ls = label_smoothing
+    
+    def forward(self, input: torch.Tensor, target: torch.Tensor):
+        C = input.shape[1]
+        random_target = torch.randint_like(target, C)
+        mask = (torch.rand_like(target, dtype=torch.get_default_dtype()) < self.ls).to(target.dtype)
+        target = target * (1 - mask) + random_target * mask
+        return self.ce(input, target)
+
+
 @torch.no_grad()
 def count_correct(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""

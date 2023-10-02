@@ -40,8 +40,8 @@ class KModel:
 
         with autocast():
             output = self.model(inputs)
-
         cur_loss = self.criterion(output, targets)
+
         cur_rescaled_loss = cur_loss if grad_upscale == 1 else cur_loss * grad_upscale
         cur_rescaled_loss.backward()
 
@@ -74,15 +74,15 @@ class KModel:
 
         with autocast():
             output = self.model(inputs)
-            cur_loss = self.criterion(output, targets)
+        cur_loss = self.criterion(output, targets)
 
-            cur_metrics = []
-            for m in self.metrics:
-                mval = m(output, targets)
-                if isinstance(mval, (list, tuple)):
-                    cur_metrics.extend(mval)
-                else:
-                    cur_metrics.append(mval)
+        cur_metrics = []
+        for m in self.metrics:
+            mval = m(output, targets)
+            if isinstance(mval, (list, tuple)):
+                cur_metrics.extend(mval)
+            else:
+                cur_metrics.append(mval)
 
         return torch.stack([
             *cur_metrics, cur_loss * inputs.shape[0],
@@ -115,7 +115,7 @@ class KModel:
     
 
     @torch.no_grad()
-    def log_param_stats(self, log):
+    def log_param_stats(self, log, details=True):
         all_norm2 = 0.
         for name, param in self.model.named_parameters():
             norm2 = (param.data ** 2).sum().float().item()
@@ -123,14 +123,15 @@ class KModel:
             if param in self.param_name_dict:
                 name = self.param_name_dict[param]
             
-            log[f'norm/{name}'] = norm2 ** 0.5
+            if details:
+                log[f'norm/{name}'] = norm2 ** 0.5
             all_norm2 += norm2
         
         log[f'norm/all'] = all_norm2 ** 0.5
 
 
     @torch.no_grad()
-    def log_grad_stats(self, log):
+    def log_grad_stats(self, log, details=True):
         all_norm2 = 0.
         for name, param in self.model.named_parameters():
             if param.grad is not None:
@@ -139,7 +140,8 @@ class KModel:
                 if param in self.param_name_dict:
                     name = self.param_name_dict[param]
 
-                log[f'gnorm/{name}'] = norm2 ** 0.5
+                if details:
+                    log[f'gnorm/{name}'] = norm2 ** 0.5
                 all_norm2 += norm2
         
         log[f'gnorm/all'] = all_norm2 ** 0.5
@@ -160,6 +162,10 @@ class KModel:
             if p.requires_grad:
                 yield p.grad
     
+
+    def params(self):
+        yield from self.model.parameters()
+
     
     def trainable_params(self):
         for p in self.model.parameters():

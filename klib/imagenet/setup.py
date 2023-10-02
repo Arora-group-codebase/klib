@@ -1,7 +1,7 @@
 import klib.trainer
-from klib.ksche import KMultiStepScheduler
 from .data import get_kdataloader
 from klib.metric import count_correct
+import argparse
 
 
 __all__ = ['ImageNetTrainerSetup']
@@ -19,6 +19,7 @@ class ImageNetTrainerSetup(klib.trainer.BaseTrainerSetup):
             backend=self.args.dataloader_backend,
             data_pth=self.args.train_pth, batch_size=self.local_batch_size,
             num_workers=self.args.n_dataloader_workers, drop_last=True, device=self.device, train=1, seed=self.args.seed,
+            shuffle=True, replacement=self.args.sample_with_replacement,
             distributed=self.world_size > 1
         )
 
@@ -26,6 +27,7 @@ class ImageNetTrainerSetup(klib.trainer.BaseTrainerSetup):
             backend=self.args.dataloader_backend,
             data_pth=self.args.val_pth, batch_size=VAL_B,
             num_workers=self.args.n_dataloader_workers, drop_last=False, device=self.device, train=0, seed=self.args.seed,
+            shuffle=False, replacement=False,
             distributed=self.world_size > 1
         )
     
@@ -37,33 +39,12 @@ class ImageNetTrainerSetup(klib.trainer.BaseTrainerSetup):
                 backend=self.args.dataloader_backend,
                 data_pth=self.args.train_pth, batch_size=self.bn_batch_size,
                 num_workers=self.args.n_dataloader_workers, drop_last=True, device=self.device, train=1, seed=self.args.seed,
+                shuffle=True, replacement=self.args.sample_with_replacement,
                 distributed=self.world_size > 1
             )
         else:
             self.bn_dataloader = None
     
-
-    @classmethod
-    def init_scheduler(cls, self):
-        scale = self.total_batch_size / 256
-        rescaled_lr = self.args.lr * scale
-
-        if self.args.warmup:
-            warmup_steps = self.args.warmup_epochs * self.steps_per_epoch
-            if self.args.warmup_start_lr is None:
-                self.args.warmup_start_lr = self.args.lr
-            warmup_sche = [self.args.warmup_start_lr + (rescaled_lr - self.args.warmup_start_lr) * (t / (warmup_steps - 1))  for t in range(warmup_steps)]
-        else:
-            self.args.warmup_epochs = 0
-            warmup_sche = [rescaled_lr]
-        
-        self.kscheduler = KMultiStepScheduler(
-            self.optimizer,
-            warmup_sche=warmup_sche,
-            lrdecay_sche=self.args.lrdecay_sche,
-            gamma=self.args.gamma
-        )
-
     
     @classmethod
     def init_get_metrics(cls, self):
@@ -74,14 +55,24 @@ class ImageNetTrainerSetup(klib.trainer.BaseTrainerSetup):
         
 
     @classmethod
-    def default_args_dict(cls) -> dict:
-        return {
-            **super().default_args_dict(),
+    def add_argparse_args(cls, parser: argparse.ArgumentParser):
+        super().add_argparse_args(parser)
+
+        parser.set_defaults(**{
+            'lr_sche_type': 'multistep',
+            'base_batch_size_for_lr': 256,
             'autocast_dtype': 'float16',
             'grad_scaler': 1,
-            "num_classes": 1000,
-            "criterion": "ce"
-        }
+            'arch_lib': ['klib.imagenet'],
+        })
+
+        group = parser.add_argument_group('ImageNet special')
+        group.add_argument('--dataloader-backend', type=str, default='ffcv')
+        group.add_argument('--n-dataloader-workers', type=int, default=6)
+        group.add_argument('--num-classes', type=int, default=1000)
+        group.add_argument('--criterion', type=str, default='ce')
+        group.add_argument('--sample-with-replacement', type=int, default=0)
+
 
     @classmethod
     def input_size(cls, self):

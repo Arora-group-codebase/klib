@@ -27,7 +27,8 @@ __all__ = ['get_kdataloader']
 
 
 def get_torch_dataloader(
-    data_pth, *, batch_size, num_workers, drop_last, device, train, seed, distributed
+    data_pth, *, batch_size, num_workers, drop_last, device, train, seed,
+    shuffle, replacement, distributed
 ) -> KDataLoaderTorch:
 
     normalize = transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
@@ -45,7 +46,7 @@ def get_torch_dataloader(
         return KDataLoaderTorch(
             train_utils.get_torch_dataloader_for_dataset(
                 dataset, batch_size=batch_size, num_workers=num_workers,
-                drop_last=drop_last, seed=seed, shuffle=True, distributed=distributed
+                drop_last=drop_last, seed=seed, shuffle=shuffle, replacement=replacement, distributed=distributed
             ), device
         )
     else:
@@ -61,16 +62,21 @@ def get_torch_dataloader(
         return KDataLoaderTorch(
             train_utils.get_torch_dataloader_for_dataset(
                 dataset, batch_size=batch_size, num_workers=num_workers,
-                drop_last=False, seed=seed, shuffle=False, distributed=distributed
+                drop_last=False, seed=seed, shuffle=shuffle, replacement=replacement, distributed=distributed
             ), device
         )
 
         
 def get_ffcv_dataloader(
-    data_pth, *, batch_size, num_workers, drop_last, device, train, seed, distributed
+    data_pth, *, batch_size, num_workers, drop_last, device, train, seed,
+    shuffle, replacement, distributed
 ) -> KDataLoaderFFCV:
 
+    assert not replacement
+
     if train:
+        assert shuffle
+
         decoder = RandomResizedCropRGBImageDecoder((OUTPUT_SIZE, OUTPUT_SIZE))
         image_pipeline: List[Operation] = [
             decoder,
@@ -102,6 +108,8 @@ def get_ffcv_dataloader(
                         seed=seed,
                         batches_ahead=3)
     else:
+        assert not shuffle
+        
         cropper = CenterCropRGBImageDecoder((OUTPUT_SIZE, OUTPUT_SIZE), ratio=DEFAULT_CROP_RATIO)
         image_pipeline = [
             cropper,

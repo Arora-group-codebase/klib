@@ -3,10 +3,42 @@ Kaifeng's library for training neural nets
 
 # How to setup
 
+Install conda
+
 ```bash
-conda create -y -n klib python=3.9 cupy pkg-config compilers libjpeg-turbo opencv pytorch torchvision cudatoolkit=11.3 numba -c pytorch -c conda-forge
+conda create -y -n klib pkg-config
 conda activate klib
+conda install libjpeg-turbo -c conda-forge
+conda install pytorch=*=*cuda* torchvision pytorch-cuda=11.7 opencv -c pytorch -c nvidia
+conda install numba
+pip install cupy-cuda11x
+conda update ffmpeg
 pip install -r requirements.txt
+```
+
+# Compilers?
+
+If the installation fails, check if your compilers are too old. If so, do this:
+
+```bash
+conda install -y compilers -c conda-forge
+```
+
+If some error occurs when you run the code, try the following.
+Write the following content to `<miniconda-path>/envs/klib/etc/conda/activate.d/env_vars.sh`
+```bash
+#!/bin/sh
+  
+export OLD_LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH}
+```
+
+Write the following content to `<miniconda-path>/envs/klib/etc/conda/deactivate.d/env_vars.sh`
+```bash
+#!/bin/sh
+
+export LD_LIBRARY_PATH=${OLD_LD_LIBRARY_PATH}
+unset OLD_LD_LIBRARY_PATH
 ```
 
 # How to train CIFAR-10

@@ -9,21 +9,22 @@ def get_final_layer(code: str, in_features: int, num_classes: int = 1000):
     
     fc = nn.Linear(in_features, num_classes)
     
-    if subcode[0] == 'linear-fixed':
+    if subcode[0] in ['linear', 'linear-fixed']:
         fc.weight.data.normal_(0, math.sqrt(1 / fc.in_features))
         fc.bias.data.zero_()
     else:
-        assert subcode[0] == 'linear-fixed-etf'
+        assert subcode[0] in ['linear-fixed-etf', 'linear-etf']
 
         with torch.no_grad():
             nn.init.orthogonal_(fc.weight.data)
             fc.weight.data = (math.sqrt(num_classes / (num_classes - 1)) * (torch.eye(num_classes) - torch.ones((num_classes, num_classes)) / num_classes)) @ fc.weight.data
-        
         fc.bias.data.zero_()
-
-    if len(subcode) == 1:
+    
+    if 'fixed' in subcode[0]:
         fc.weight.requires_grad = False
         fc.bias.requires_grad = False
+
+    if len(subcode) == 1:
         return fc
     
     assert len(subcode) == 2

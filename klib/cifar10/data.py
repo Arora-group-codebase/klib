@@ -9,7 +9,6 @@ import torch.utils.data
 from ffcv.fields import IntField, RGBImageField
 from ffcv.fields.decoders import IntDecoder, SimpleRGBImageDecoder
 from ffcv.loader import Loader, OrderOption
-from ffcv.pipeline.operation import Operation
 from ffcv.transforms import RandomHorizontalFlip, Cutout, \
     RandomTranslate, Convert, ToDevice, ToTensor, ToTorchImage
 from ffcv.transforms.common import Squeeze
@@ -31,7 +30,7 @@ CIFAR_STD = np.array([0.2023, 0.1994, 0.2010])
 
 def get_torch_dataloader(
     data_pth, *, batch_size, num_workers, drop_last, device, train, seed,
-    crop, hflip, replacement=False, distributed=False
+    crop, hflip, shuffle, replacement, distributed=False, subset=False, subset_size=50000, num_classes=10
 ) -> KDataLoaderTorch:
 
     transform_list = []
@@ -50,14 +49,14 @@ def get_torch_dataloader(
     return KDataLoaderTorch(
         train_utils.get_torch_dataloader_for_dataset(
             dataset, batch_size=batch_size, num_workers=num_workers,
-            drop_last=drop_last, seed=seed, shuffle=train, replacement=replacement, distributed=distributed
+            drop_last=drop_last, seed=seed, shuffle=shuffle, replacement=replacement, distributed=distributed, subset=subset, subset_size=subset_size, num_classes=num_classes
         ), device
     )
 
 
 def get_ffcv_dataloader(
     data_pth, *, batch_size, num_workers, drop_last, device, train, seed,
-    crop, hflip, replacement=False, distributed=False
+    crop, hflip, shuffle, replacement, distributed=False
 ) -> KDataLoaderFFCV:
 
     assert not replacement
@@ -105,7 +104,7 @@ def get_ffcv_dataloader(
             ffcv_fname,
             batch_size=batch_size,
             num_workers=num_workers,
-            order=OrderOption.RANDOM if train else OrderOption.SEQUENTIAL,
+            order=OrderOption.RANDOM if shuffle else OrderOption.SEQUENTIAL,
             drop_last=drop_last,
             pipelines={
                 'image': image_pipeline,

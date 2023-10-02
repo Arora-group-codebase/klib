@@ -8,15 +8,30 @@ import time
 class KDataLoader:
     total_load_time = 0
     
-    def _enum(self, num):
+    def _iter(self, num):
         raise NotImplementedError()
+    
 
-    def enum(self, num=None):
+    def iter(self, num=None):
+        if num is not None:
+            while num > len(self):
+                yield from self.iter()
+                num -= len(self)
+        
         last = time.time()
-        for ret in self._enum(num):
+        for ret in self._iter(num):
             KDataLoader.total_load_time += time.time() - last
             yield ret
             last = time.time()
+
+
+    def enum(self, num=None):
+        yield from enumerate(self.iter(num))
+    
+    
+    def __len__(self):
+        raise NotImplementedError()
+    
     
     def dataset_size(self):
         raise NotImplementedError()
@@ -28,18 +43,26 @@ class KDataLoaderTorch(KDataLoader):
     def __init__(self, loader, device):
         self.loader = loader
         self.device = device
+        if hasattr(self.loader.sampler, 'set_epoch'):
+            self.sampler = self.loader.sampler
+            self.cnt = 0
+        else:
+            self.sampler = None
     
-    def _enum(self, num):
+    def _iter(self, num):
+        if self.sampler is not None:
+            self.sampler.set_epoch(self.cnt)
+            self.cnt += 1
         if num is None:
             for idx, pt in enumerate(self.loader):
-                yield idx, tuple(p.to(self.device) for p in pt)
+                yield tuple(p.to(self.device) for p in pt)
         else:
             it = iter(self.loader)
             for idx, pt in enumerate(self.loader):
                 if idx >= num:
                     del it
                     break
-                yield idx, tuple(p.to(self.device) for p in pt)
+                yield tuple(p.to(self.device) for p in pt)
 
     def __len__(self):
         return len(self.loader)
@@ -54,11 +77,11 @@ class KDataLoaderFFCV(KDataLoader):
     def __init__(self, loader):
         self.loader = loader
     
-    def _enum(self, num):
+    def _iter(self, num):
         if num is None:
             for idx, pt in enumerate(self.loader):
                 torch.cuda.synchronize()
-                yield idx, pt
+                yield pt
             torch.cuda.synchronize()
         else:
             it = iter(self.loader)
@@ -67,7 +90,7 @@ class KDataLoaderFFCV(KDataLoader):
                     it.close()
                     break
                 torch.cuda.synchronize()
-                yield idx, pt
+                yield pt
             torch.cuda.synchronize()
 
     def __len__(self):
@@ -86,7 +109,7 @@ class KTensorDataLoader(KDataLoader):
         self.shuffle = shuffle
         self.drop_last = drop_last
     
-    def _enum(self, num=None):
+    def _iter(self, num):
         if self.shuffle:
             perm = torch.randperm(self.dataset_size())
             
@@ -96,17 +119,17 @@ class KTensorDataLoader(KDataLoader):
                 break
             if self.shuffle:
                 pm = perm[idx * self.batch_size : (idx + 1) * self.batch_size]
-                yield idx, tuple(p[pm].to(self.device) for p in self.data)
+                yield tuple(p[pm].to(self.device) for p in self.data)
             else:
-                yield idx, tuple(p[idx * self.batch_size : (idx + 1) * self.batch_size].to(self.device) for p in self.data)
+                yield tuple(p[idx * self.batch_size : (idx + 1) * self.batch_size].to(self.device) for p in self.data)
         
         if num is None or n < num:
             if not self.drop_last and n * self.batch_size < self.dataset_size():
                 if self.shuffle:
                     pm = perm[n * self.batch_size:]
-                    yield n, tuple(p[pm].to(self.device) for p in self.data)
+                    yield tuple(p[pm].to(self.device) for p in self.data)
                 else:
-                    yield n, tuple(p[n * self.batch_size:].to(self.device) for p in self.data)
+                    yield tuple(p[n * self.batch_size:].to(self.device) for p in self.data)
     
     def __len__(self):
         if self.drop_last:
